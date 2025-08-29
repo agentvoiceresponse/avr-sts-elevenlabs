@@ -24,37 +24,10 @@ const app = express();
  */
 const createElevenLabsConnection = async (agentId) => {
   try {
-    let wsUrl;
-
-    // Audio configuration - ElevenLabs typically uses 24kHz by default
-    // Let's try to explicitly request a specific format
-    const audioConfig = {}; // Start without config to see default format first
-
-    // Check if we need to use signed URL (for private agents)
-    if (process.env.ELEVENLABS_API_KEY) {
-      // Get signed URL for private agents with audio configuration
-      const queryParams = new URLSearchParams({
-        agent_id: agentId,
-        ...audioConfig,
-      });
-
-      const response = await axios.get(
-        `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?${queryParams}`,
-        {
-          headers: {
-            "xi-api-key": process.env.ELEVENLABS_API_KEY,
-          },
-        }
-      );
-      wsUrl = response.data.signed_url;
-    } else {
-      // Use direct connection for public agents with audio configuration
-      const queryParams = new URLSearchParams({
-        agent_id: agentId,
-        ...audioConfig,
-      });
-      wsUrl = `wss://api.elevenlabs.io/v1/convai/conversation?${queryParams}`;
-    }
+    const queryParams = new URLSearchParams({
+      agent_id: agentId,
+    });
+    const wsUrl = `wss://api.elevenlabs.io/v1/convai/conversation?${queryParams}`;
 
     const ws = new WebSocket(wsUrl);
 
@@ -129,7 +102,14 @@ const createElevenLabsConnection = async (agentId) => {
             break;
           case "ping":
             // Respond to ping with pong
-            ws.send(JSON.stringify({ type: "pong" }));
+            // Received ping { ping_event: { event_id: 2, ping_ms: null }, type: 'ping' }
+            console.log("Received ping", message);
+            ws.send(
+              JSON.stringify({
+                type: "pong",
+                event_id: message.ping_event.event_id,
+              })
+            );
             break;
           default:
             console.log("Unknown message type:", message);
