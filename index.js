@@ -37,6 +37,10 @@ const createElevenLabsConnection = async (agentId) => {
     // This will be set from the handleAudioStream function
     ws.responseStream = null;
 
+    let outputStartTime = null;
+    let outputChunksQueue = Buffer.alloc(0);
+    let isFirstOutputChunk = true;
+
     ws.on("message", (data) => {
       try {
         const message = JSON.parse(data);
@@ -58,40 +62,65 @@ const createElevenLabsConnection = async (agentId) => {
           case "audio":
             console.log("Received audio from agent");
             // Stream audio data back to client
+            // if (message.audio_event?.audio_base_64 && ws.responseStream) {
+            //   const audioBuffer = Buffer.from(
+            //     message.audio_event.audio_base_64,
+            //     "base64"
+            //   );
+            //   console.log(`Audio chunk size: ${audioBuffer.length} bytes`);
+
+            //   // Add to audio buffer for potential processing
+            //   if (!ws.audioChunksQueue) {
+            //     ws.audioChunksQueue = Buffer.alloc(0);
+            //     ws.isFirstAudioChunk = true;
+            //     ws.audioStartTime = Date.now();
+            //   }
+
+            //   // Accumulate audio chunks
+            //   ws.audioChunksQueue = Buffer.concat([
+            //     ws.audioChunksQueue,
+            //     audioBuffer,
+            //   ]);
+
+            //   // Similar to Ultravox example - add some buffering for smoother playback
+            //   if (ws.isFirstAudioChunk) {
+            //     ws.isFirstAudioChunk = false;
+            //     console.log("First audio chunk received, starting playback...");
+            //   }
+
+            //   // Write accumulated buffer if we have enough data
+            //   if (ws.audioChunksQueue.length >= 1024) {
+            //     // Minimum buffer size
+            //     const bufferToWrite = ws.audioChunksQueue;
+            //     ws.audioChunksQueue = Buffer.alloc(0);
+            //     ws.responseStream.write(bufferToWrite);
+            //   }
+            // }
+
             if (message.audio_event?.audio_base_64 && ws.responseStream) {
-              const audioBuffer = Buffer.from(
+              const buffer = Buffer.from(
                 message.audio_event.audio_base_64,
                 "base64"
               );
-              console.log(`Audio chunk size: ${audioBuffer.length} bytes`);
+              // const buffer = Buffer.from(data);
 
-              // Add to audio buffer for potential processing
-              if (!ws.audioChunksQueue) {
-                ws.audioChunksQueue = Buffer.alloc(0);
-                ws.isFirstAudioChunk = true;
-                ws.audioStartTime = Date.now();
+              if (isFirstOutputChunk) {
+                outputStartTime = Date.now();
+                isFirstOutputChunk = false;
               }
 
-              // Accumulate audio chunks
-              ws.audioChunksQueue = Buffer.concat([
-                ws.audioChunksQueue,
-                audioBuffer,
-              ]);
+              outputChunksQueue = Buffer.concat([outputChunksQueue, buffer]);
 
-              // Similar to Ultravox example - add some buffering for smoother playback
-              if (ws.isFirstAudioChunk) {
-                ws.isFirstAudioChunk = false;
-                console.log("First audio chunk received, starting playback...");
-              }
-
-              // Write accumulated buffer if we have enough data
-              if (ws.audioChunksQueue.length >= 1024) {
-                // Minimum buffer size
-                const bufferToWrite = ws.audioChunksQueue;
-                ws.audioChunksQueue = Buffer.alloc(0);
-                ws.responseStream.write(bufferToWrite);
-              }
+              // Flush buffer every 100ms
+              const toWrite = outputChunksQueue;
+              console.log("Flushing buffer", toWrite.length);
+              outputChunksQueue = Buffer.alloc(0);
+              outputStartTime = Date.now();
+              ws.responseStream.write(toWrite);
+              // if (outputStartTime && Date.now() - outputStartTime >= 100) {
+              // }
             }
+
             break;
           case "conversation_initiation_metadata":
             console.log(
@@ -221,7 +250,7 @@ const handleAudioStream = async (req, res) => {
         });
 
         ws.send(message);
-        console.log(`Sent audio chunk (${audioChunk.length} bytes)`);
+        // console.log(`Sent audio chunk (${audioChunk.length} bytes)`);
       } else {
         console.warn("WebSocket not ready, buffering audio chunk");
       }
