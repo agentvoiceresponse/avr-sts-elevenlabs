@@ -177,16 +177,6 @@ const handleAudioStream = async (req, res) => {
     });
   }
 
-  // Set headers for audio streaming
-  res.setHeader("Content-Type", "application/octet-stream");
-  res.setHeader("Transfer-Encoding", "chunked");
-
-  // Add audio format information for client (if needed)
-  res.setHeader("X-Audio-Sample-Rate", "24000"); // ElevenLabs default
-  res.setHeader("X-Audio-Format", "PCM");
-  res.setHeader("X-Audio-Channels", "1"); // Mono
-  res.setHeader("X-Audio-Bit-Depth", "16");
-
   let audioBuffer = Buffer.alloc(0);
   let ws;
 
