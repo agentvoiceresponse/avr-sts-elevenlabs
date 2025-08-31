@@ -10,7 +10,6 @@
  */
 
 const express = require("express");
-const axios = require("axios");
 const WebSocket = require("ws");
 require("dotenv").config();
 
