@@ -99,10 +99,38 @@ const createElevenLabsConnection = async (agentId) => {
                 "base64"
               );
 
-              // Simply stream the audio directly without any delays or chunking
-              console.log(`Streaming audio chunk (${buffer.length} bytes)`);
-              if (ws.responseStream && !ws.responseStream.destroyed) {
-                ws.responseStream.write(buffer);
+              console.log(`Received audio chunk (${buffer.length} bytes)`);
+
+              // Split large chunks into 8000-byte parts and send immediately
+              if (buffer.length > 8000) {
+                const chunkSize = 8000;
+                const totalChunks = Math.ceil(buffer.length / chunkSize);
+
+                console.log(
+                  `Splitting into ${totalChunks} parts of ${chunkSize} bytes each`
+                );
+
+                for (let i = 0; i < buffer.length; i += chunkSize) {
+                  const chunk = buffer.subarray(i, i + chunkSize);
+                  const chunkNum = Math.floor(i / chunkSize) + 1;
+
+                  console.log(
+                    `Sending part ${chunkNum}/${totalChunks} (${chunk.length} bytes)`
+                  );
+
+                  if (ws.responseStream && !ws.responseStream.destroyed) {
+                    ws.responseStream.write(chunk);
+                  } else {
+                    console.log("Response stream unavailable, stopping");
+                    break;
+                  }
+                }
+              } else {
+                // Small chunk, send directly
+                console.log(`Sending small chunk (${buffer.length} bytes)`);
+                if (ws.responseStream && !ws.responseStream.destroyed) {
+                  ws.responseStream.write(buffer);
+                }
               }
             }
             break;
