@@ -17,16 +17,51 @@ require("dotenv").config();
 const app = express();
 
 /**
+ * Gets a signed URL for private agent conversations
+ * @param {string} agentId - The ElevenLabs agent ID
+ * @param {string} apiKey - The ElevenLabs API key
+ * @returns {Promise<string>} - The signed WebSocket URL
+ */
+const getSignedUrl = async (agentId, apiKey) => {
+  const response = await fetch(
+    `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${agentId}`,
+    {
+      method: "GET",
+      headers: {
+        "xi-api-key": apiKey,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to get signed URL: ${response.status} ${response.statusText}`
+    );
+  }
+
+  const data = await response.json();
+  return data.signed_url;
+};
+
+/**
  * Creates a WebSocket connection to ElevenLabs agent
  * @param {string} agentId - The ElevenLabs agent ID
  * @returns {Promise<WebSocket>} - The WebSocket connection
  */
 const createElevenLabsConnection = async (agentId) => {
   try {
-    const queryParams = new URLSearchParams({
-      agent_id: agentId,
-    });
-    const wsUrl = `wss://api.elevenlabs.io/v1/convai/conversation?${queryParams}`;
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    let wsUrl;
+
+    if (apiKey) {
+      // For private agents, get a signed URL
+      console.log("Getting signed URL for private agent");
+      wsUrl = await getSignedUrl(agentId, apiKey);
+    } else {
+      // For public agents, use direct URL
+      console.log("Connecting to public agent");
+      wsUrl = `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${agentId}`;
+    }
 
     const ws = new WebSocket(wsUrl);
 
@@ -281,9 +316,17 @@ const handleAudioStream = async (req, res) => {
     });
   } catch (error) {
     console.error("Failed to establish WebSocket connection:", error);
-    return res
-      .status(500)
-      .json({ error: "Failed to connect to ElevenLabs agent" });
+
+    // Check if it's a signed URL error (authentication issue)
+    if (error.message.includes("Failed to get signed URL")) {
+      return res.status(401).json({
+        error: "Authentication failed: " + error.message,
+      });
+    }
+
+    return res.status(500).json({
+      error: "Failed to connect to ElevenLabs agent: " + error.message,
+    });
   }
 
   // Handle incoming audio data from client
@@ -300,8 +343,12 @@ const handleAudioStream = async (req, res) => {
       }
 
       // Accumulate audio data
-      audioBuffer = Buffer.concat([audioBuffer, audioChunk]);
-
+      // audioBuffer = Buffer.concat([audioBuffer, audioChunk]);
+      // console.log(
+      //   "audioChunk length and timestamp in ms: ",
+      //   audioChunk.length,
+      //   Date.now()
+      // );
       // Send audio chunk to ElevenLabs agent if WebSocket is ready
       if (ws && ws.readyState === WebSocket.OPEN) {
         const audioBase64 = audioChunk.toString("base64");
@@ -362,11 +409,22 @@ process.on("SIGINT", () => {
 const PORT = process.env.PORT || 6035;
 app.listen(PORT, async () => {
   console.log(`ElevenLabs Speech-to-Speech server running on port ${PORT}`);
-  console.log("Required environment variables:");
+  console.log("Environment variables:");
   console.log(
     "- ELEVENLABS_AGENT_ID: Your ElevenLabs agent ID (can also be passed via x-agent-id header)"
   );
   console.log(
-    "- ELEVENLABS_API_KEY: Your ElevenLabs API key (optional for public agents)"
+    "- ELEVENLABS_API_KEY: Your ElevenLabs API key (optional - only required for private agents)"
   );
+
+  // Check if API key is set
+  if (!process.env.ELEVENLABS_API_KEY) {
+    console.log(
+      "ℹ️  No API key set - will attempt to connect to public agents only"
+    );
+  } else {
+    console.log(
+      "✅ ELEVENLABS_API_KEY is configured - can access both public and private agents"
+    );
+  }
 });
