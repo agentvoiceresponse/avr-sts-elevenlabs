@@ -72,10 +72,6 @@ const createElevenLabsConnection = async (agentId) => {
     // This will be set from the handleAudioStream function
     ws.responseStream = null;
 
-    let outputChunksQueue = Buffer.alloc(0);
-    let isFirstOutputChunk = true;
-    let isSendingChunks = false;
-
     ws.on("message", (data) => {
       try {
         const message = JSON.parse(data);
@@ -103,98 +99,12 @@ const createElevenLabsConnection = async (agentId) => {
                 "base64"
               );
 
-              if (isFirstOutputChunk) {
-                outputStartTime = Date.now();
-                isFirstOutputChunk = false;
-              }
-
-              outputChunksQueue = Buffer.concat([outputChunksQueue, buffer]);
-
-              // Only process if not currently sending chunks
-              if (!isSendingChunks) {
-                // Check if buffer is greater than 8000 bytes
-                if (outputChunksQueue.length > 8000) {
-                  console.log(
-                    `Large buffer detected (${outputChunksQueue.length} bytes), chunking...`
-                  );
-
-                  // Set flag to prevent overlapping sends
-                  isSendingChunks = true;
-
-                  // Split buffer into chunks of 8000 bytes or less
-                  const chunkSize = 8000;
-                  const chunks = [];
-
-                  for (
-                    let i = 0;
-                    i < outputChunksQueue.length;
-                    i += chunkSize
-                  ) {
-                    const chunk = outputChunksQueue.subarray(i, i + chunkSize);
-                    chunks.push(chunk);
-                  }
-
-                  console.log(`Split into ${chunks.length} chunks`);
-
-                  // Clear the queue before processing
-                  outputChunksQueue = Buffer.alloc(0);
-
-                  // Send chunks sequentially with 100ms delay between each
-                  const sendChunksSequentially = async (chunks) => {
-                    try {
-                      for (let i = 0; i < chunks.length; i++) {
-                        if (ws.responseStream && !ws.responseStream.destroyed) {
-                          console.log(
-                            `Sending chunk ${i + 1}/${chunks.length} (${
-                              chunks[i].length
-                            } bytes)`
-                          );
-                          ws.responseStream.write(chunks[i]);
-
-                          // Wait 100ms before sending the next chunk (except for the last one)
-                          if (i < chunks.length - 1) {
-                            await new Promise((resolve) =>
-                              setTimeout(resolve, 100)
-                            );
-                          }
-                        } else {
-                          console.log(
-                            `Response stream unavailable, stopping at chunk ${
-                              i + 1
-                            }`
-                          );
-                          break;
-                        }
-                      }
-                    } finally {
-                      // Always reset the flag when done
-                      isSendingChunks = false;
-                      console.log(
-                        "Finished sending chunks, ready for next batch"
-                      );
-                    }
-                  };
-
-                  // Start sending chunks asynchronously but don't block the main flow
-                  sendChunksSequentially(chunks).catch((error) => {
-                    console.error("Error sending chunks sequentially:", error);
-                    isSendingChunks = false; // Reset flag on error
-                  });
-                } else {
-                  // Normal flush for smaller buffers
-                  const toWrite = outputChunksQueue;
-                  console.log("Flushing buffer", toWrite.length);
-                  outputChunksQueue = Buffer.alloc(0);
-                  outputStartTime = Date.now();
-                  ws.responseStream.write(toWrite);
-                }
-              } else {
-                console.log(
-                  `Currently sending chunks, buffering ${buffer.length} bytes (total queue: ${outputChunksQueue.length} bytes)`
-                );
+              // Simply stream the audio directly without any delays or chunking
+              console.log(`Streaming audio chunk (${buffer.length} bytes)`);
+              if (ws.responseStream && !ws.responseStream.destroyed) {
+                ws.responseStream.write(buffer);
               }
             }
-
             break;
           case "conversation_initiation_metadata":
             console.log(
@@ -202,9 +112,11 @@ const createElevenLabsConnection = async (agentId) => {
               message.conversation_initiation_metadata_event
             );
             break;
+          case "interruption":
+            console.log("Conversation interrupted");
+            break;
           case "ping":
             // Respond to ping with pong
-            // Received ping { ping_event: { event_id: 2, ping_ms: null }, type: 'ping' }
             console.log("Received ping", message);
             ws.send(
               JSON.stringify({
@@ -224,23 +136,6 @@ const createElevenLabsConnection = async (agentId) => {
     ws.on("close", (code, reason) => {
       console.log("WebSocket connection closed:", code, reason);
 
-      // Reset chunking state
-      isSendingChunks = false;
-      outputChunksQueue = Buffer.alloc(0);
-
-      // Flush any remaining audio buffer before closing
-      if (
-        ws.audioChunksQueue &&
-        ws.audioChunksQueue.length > 0 &&
-        ws.responseStream &&
-        !ws.responseStream.destroyed
-      ) {
-        console.log(
-          `Flushing final audio buffer: ${ws.audioChunksQueue.length} bytes`
-        );
-        ws.responseStream.write(ws.audioChunksQueue);
-      }
-
       // End the response stream when WebSocket closes
       if (ws.responseStream && !ws.responseStream.destroyed) {
         console.log("Closing response stream due to WebSocket closure");
@@ -250,10 +145,6 @@ const createElevenLabsConnection = async (agentId) => {
 
     ws.on("error", (error) => {
       console.error("WebSocket error:", error);
-
-      // Reset chunking state
-      isSendingChunks = false;
-      outputChunksQueue = Buffer.alloc(0);
 
       // End the response stream on error
       if (ws.responseStream && !ws.responseStream.destroyed) {
@@ -290,7 +181,6 @@ const handleAudioStream = async (req, res) => {
     });
   }
 
-  let audioBuffer = Buffer.alloc(0);
   let ws;
 
   // Create WebSocket connection
@@ -342,13 +232,6 @@ const handleAudioStream = async (req, res) => {
         return;
       }
 
-      // Accumulate audio data
-      // audioBuffer = Buffer.concat([audioBuffer, audioChunk]);
-      // console.log(
-      //   "audioChunk length and timestamp in ms: ",
-      //   audioChunk.length,
-      //   Date.now()
-      // );
       // Send audio chunk to ElevenLabs agent if WebSocket is ready
       if (ws && ws.readyState === WebSocket.OPEN) {
         const audioBase64 = audioChunk.toString("base64");
@@ -357,7 +240,6 @@ const handleAudioStream = async (req, res) => {
         });
 
         ws.send(message);
-        // console.log(`Sent audio chunk (${audioChunk.length} bytes)`);
       } else {
         console.warn("WebSocket not ready, buffering audio chunk");
       }
