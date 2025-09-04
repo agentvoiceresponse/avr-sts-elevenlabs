@@ -90,6 +90,15 @@ const createElevenLabsConnection = async (agentId) => {
               message.agent_response_event?.agent_response
             );
             break;
+          case "agent_response_correction":
+            console.log(
+              "Agent response correction:",
+              message.agent_response_correction_event?.agent_response
+            );
+            console.log(
+              "New response incoming - previous audio stream will be replaced"
+            );
+            break;
           case "audio":
             console.log("Received audio from agent");
 
