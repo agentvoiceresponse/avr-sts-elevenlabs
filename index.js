@@ -167,7 +167,7 @@ const handleClientConnection = (clientWs) => {
                   type: "audio",
                   audio: message.audio_event.audio_base_64,
                 })
-              );             
+              );
               break;
 
             case "interruption":
@@ -288,8 +288,6 @@ const startServer = async () => {
         "ELEVENLABS_API_KEY is configured - can access both public and private agents"
       );
     }
-
-
   } catch (error) {
     console.error("Failed to start server:", error);
     process.exit(1);
