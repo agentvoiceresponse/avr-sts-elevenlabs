@@ -12,13 +12,11 @@
 const express = require("express");
 const WebSocket = require("ws");
 const http = require("http");
-const { v4: uuidv4 } = require("uuid");
 require("dotenv").config();
 
 // Initialize Express application
 const app = express();
 const server = http.createServer(app);
-
 /**
  * Gets a signed URL for private agent conversations
  * @param {string} agentId - The ElevenLabs agent ID
@@ -174,7 +172,7 @@ const createElevenLabsConnection = async (agentId) => {
     });
 
     ws.on("close", (code, reason) => {
-      console.log("WebSocket connection closed:", code, reason);
+      // console.log("WebSocket connection closed:", code);
 
       // End the response stream when WebSocket closes
       if (ws.responseStream && !ws.responseStream.destroyed) {
@@ -206,7 +204,7 @@ const createElevenLabsConnection = async (agentId) => {
  * @param {WebSocket} clientWs - The client WebSocket connection
  * @returns {Promise<WebSocket>} - The WebSocket connection
  */
-const createElevenLabsConnectionForWebSocket = async (agentId, clientWs) => {
+const createElevenLabsConnectionForWebSocket = async (agentId) => {
   try {
     const apiKey = process.env.ELEVENLABS_API_KEY;
     let wsUrl;
@@ -222,188 +220,6 @@ const createElevenLabsConnectionForWebSocket = async (agentId, clientWs) => {
     }
 
     const ws = new WebSocket(wsUrl);
-
-    ws.on("open", () => {
-      console.log("WebSocket connection established");
-    });
-
-    ws.on("message", (data) => {
-      try {
-        const message = JSON.parse(data);
-        console.log("Received message:", message.type || "unknown");
-
-        switch (message.type) {
-          case "user_transcript":
-            console.log(
-              "User transcript:",
-              message.user_transcription_event?.user_transcript
-            );
-            // Forward transcript to client
-            clientWs.send(
-              JSON.stringify({
-                type: "transcript",
-                transcript: message.user_transcription_event?.user_transcript,
-              })
-            );
-            break;
-
-          case "agent_response":
-            console.log(
-              "Agent response:",
-              message.agent_response_event?.agent_response
-            );
-            // Forward agent response to client
-            clientWs.send(
-              JSON.stringify({
-                type: "agent_response",
-                response: message.agent_response_event?.agent_response,
-              })
-            );
-            break;
-
-          case "agent_response_correction":
-            console.log(
-              "Agent response correction:",
-              message.agent_response_correction_event?.agent_response
-            );
-            console.log(
-              "New response incoming - previous audio stream will be replaced"
-            );
-            break;
-
-          // case "audio":
-          //   console.log("Received audio from agent");
-          //   // Forward audio to client
-          //   if (message.audio_event?.audio_base_64) {
-          //     clientWs.send(
-          //       JSON.stringify({
-          //         type: "audio",
-          //         audio: message.audio_event.audio_base_64,
-          //       })
-          //     );
-          //   }
-          //   break;
-
-          case "audio":
-            console.log("Received audio from agent");
-
-            if (message.audio_event?.audio_base_64 && ws.responseStream) {
-              const buffer = Buffer.from(
-                message.audio_event.audio_base_64,
-                "base64"
-              );
-
-              console.log(`Received audio chunk (${buffer.length} bytes)`);
-
-              // Split large chunks into 8000-byte parts and send immediately
-              if (buffer.length > 8000) {
-                const chunkSize = 8000;
-                const totalChunks = Math.ceil(buffer.length / chunkSize);
-
-                console.log(
-                  `Splitting into ${totalChunks} parts of ${chunkSize} bytes each`
-                );
-
-                for (let i = 0; i < buffer.length; i += chunkSize) {
-                  const chunk = buffer.subarray(i, i + chunkSize);
-                  const chunkNum = Math.floor(i / chunkSize) + 1;
-
-                  console.log(
-                    `Sending part ${chunkNum}/${totalChunks} (${chunk.length} bytes)`
-                  );
-
-                  // if (ws.responseStream && !ws.responseStream.destroyed) {
-                  //   ws.responseStream.write(chunk);
-                  // } else {
-                  //   console.log("Response stream unavailable, stopping");
-                  //   break;
-                  // }
-                  clientWs.send(
-                    JSON.stringify({
-                      type: "audio",
-                      audio: chunk,
-                    })
-                  );
-                }
-              } else {
-                // Small chunk, send directly
-                console.log(`Sending small chunk (${buffer.length} bytes)`);
-                // if (ws.responseStream && !ws.responseStream.destroyed) {
-                //   ws.responseStream.write(buffer);
-                // }
-                clientWs.send(
-                  JSON.stringify({
-                    type: "audio",
-                    audio: buffer,
-                  })
-                );
-              }
-            }
-            break;
-
-          case "conversation_initiation_metadata":
-            console.log(
-              "Conversation initiated:",
-              message.conversation_initiation_metadata_event
-            );
-            // Forward conversation metadata to client
-            clientWs.send(
-              JSON.stringify({
-                type: "conversation_initiated",
-                metadata: message.conversation_initiation_metadata_event,
-              })
-            );
-            break;
-
-          case "interruption":
-            console.log("Conversation interrupted");
-            // Forward interruption to client
-            clientWs.send(
-              JSON.stringify({
-                type: "interruption",
-              })
-            );
-            break;
-
-          case "ping":
-            // Respond to ping with pong
-            console.log("Received ping", message);
-            ws.send(
-              JSON.stringify({
-                type: "pong",
-                event_id: message.ping_event.event_id,
-              })
-            );
-            break;
-
-          default:
-            console.log("Unknown message type:", message);
-        }
-      } catch (error) {
-        console.error("Error parsing WebSocket message:", error);
-      }
-    });
-
-    ws.on("close", (code, reason) => {
-      console.log("WebSocket connection closed:", code, reason);
-      // Notify client that ElevenLabs connection closed
-      clientWs.send(
-        JSON.stringify({
-          type: "elevenlabs_disconnected",
-        })
-      );
-    });
-
-    ws.on("error", (error) => {
-      console.error("WebSocket error:", error);
-      // Notify client of ElevenLabs connection error
-      clientWs.send(
-        JSON.stringify({
-          type: "error",
-          message: "ElevenLabs connection error",
-        })
-      );
-    });
 
     return ws;
   } catch (error) {
@@ -530,19 +346,16 @@ const handleAudioStream = async (req, res) => {
 // app.post("/speech-to-speech-stream", handleAudioStream);
 
 // Create WebSocket server
-const wss = new WebSocket.Server({ server });
-
-// Store active connections
-const activeConnections = new Map();
+const wss = new WebSocket.Server({ port: 6033 });
 
 /**
  * Handles WebSocket connections from clients
  */
-wss.on("connection", (clientWs, req) => {
-  const clientId = uuidv4();
-  const agentId = req.headers["x-agent-id"] || process.env.ELEVENLABS_AGENT_ID;
+wss.on("connection", (clientWs) => {
+  const agentId = process.env.ELEVENLABS_AGENT_ID || null;
+  let wsElevenLabs = null;
 
-  console.log(`New WebSocket client connected: ${clientId}`);
+  console.log(`New WebSocket client connected`);
   console.log(`Agent ID: ${agentId}`);
 
   if (!agentId) {
@@ -557,17 +370,7 @@ wss.on("connection", (clientWs, req) => {
     return;
   }
 
-  clientWs.send(JSON.stringify({ type: "connected", clientId, agentId }));
-
-  // Store client connection
-  activeConnections.set(clientId, {
-    clientWs,
-    agentId,
-    elevenLabsWs: null,
-    isConnected: false,
-  });
-
-  // Send connection confirmation
+  clientWs.send(JSON.stringify({ type: "connected" }));
 
   // Handle incoming messages from client
   clientWs.on("message", async (data) => {
@@ -576,102 +379,290 @@ wss.on("connection", (clientWs, req) => {
 
       switch (message.type) {
         case "audio":
-          await handleClientAudio(clientId, message.audio);
+          if (wsElevenLabs) {
+            if (wsElevenLabs.readyState === WebSocket.OPEN) {
+              wsElevenLabs.send(
+                JSON.stringify({
+                  user_audio_chunk: message.audio.toString("base64"),
+                })
+              );
+            }
+          }
           break;
-        case "ping":
-          clientWs.send(
-            JSON.stringify({
-              type: "pong",
-              timestamp: Date.now(),
-            })
-          );
+        // case "ping":
+        //   clientWs.send(
+        //     JSON.stringify({
+        //       type: "pong",
+        //       timestamp: Date.now(),
+        //     })
+        //   );
+        //   break;
+        case "init":
+          // init elevenlabs connection
+          wsElevenLabs = await createElevenLabsConnectionForWebSocket(agentId);
+          wsElevenLabs.on("message", (data) => {
+            try {
+              const message = JSON.parse(data);
+              console.log("Received message:", message.type || "unknown");
+
+              switch (message.type) {
+                case "user_transcript":
+                  console.log(
+                    "User transcript:",
+                    message.user_transcription_event?.user_transcript
+                  );
+                  // Forward transcript to client
+                  // if (clientWs.readyState === WebSocket.OPEN) {
+                  //   clientWs.send(
+                  //     JSON.stringify({
+                  //       type: "transcript",
+                  //       transcript:
+                  //         message.user_transcription_event?.user_transcript,
+                  //     })
+                  //   );
+                  // }
+                  break;
+
+                case "agent_response":
+                  console.log(
+                    "Agent response:",
+                    message.agent_response_event?.agent_response
+                  );
+                  // Forward agent response to client
+                  // if (clientWs.readyState === WebSocket.OPEN) {
+                  //   clientWs.send(
+                  //     JSON.stringify({
+                  //       type: "agent_response",
+                  //       response: message.agent_response_event?.agent_response,
+                  //     })
+                  //   );
+                  // }
+                  break;
+
+                case "agent_response_correction":
+                  console.log(
+                    "Agent response correction:",
+                    message.agent_response_correction_event?.agent_response
+                  );
+                  console.log(
+                    "New response incoming - previous audio stream will be replaced"
+                  );
+                  if (clientWs.readyState === WebSocket.OPEN) {
+                    clientWs.send(
+                      JSON.stringify({
+                        type: "interruption",
+                      })
+                    );
+                  }
+                  break;
+
+                // case "audio":
+                //   console.log("Received audio from agent");
+                //   // Forward audio to client
+                //   if (message.audio_event?.audio_base_64) {
+                //     clientWs.send(
+                //       JSON.stringify({
+                //         type: "audio",
+                //         audio: message.audio_event.audio_base_64,
+                //       })
+                //     );
+                //   }
+                //   break;
+
+                case "audio":
+                  console.log("Received audio from agent");
+
+                  if (
+                    message.audio_event?.audio_base_64 &&
+                    wsElevenLabs.readyState === WebSocket.OPEN
+                  ) {
+                    const buffer = Buffer.from(
+                      message.audio_event.audio_base_64,
+                      "base64"
+                    );
+
+                    console.log(
+                      `Received audio chunk (${buffer.length} bytes)`
+                    );
+
+                    // Split large chunks into 8000-byte parts and send immediately
+                    if (buffer.length > 8000) {
+                      const chunkSize = 8000;
+                      const totalChunks = Math.ceil(buffer.length / chunkSize);
+
+                      console.log(
+                        `Splitting into ${totalChunks} parts of ${chunkSize} bytes each`
+                      );
+
+                      for (let i = 0; i < buffer.length; i += chunkSize) {
+                        const chunk = buffer.subarray(i, i + chunkSize);
+                        const chunkNum = Math.floor(i / chunkSize) + 1;
+
+                        console.log(
+                          `Sending part ${chunkNum}/${totalChunks} (${chunk.length} bytes)`
+                        );
+
+                        // if (ws.responseStream && !ws.responseStream.destroyed) {
+                        //   ws.responseStream.write(chunk);
+                        // } else {
+                        //   console.log("Response stream unavailable, stopping");
+                        //   break;
+                        // }
+                        if (clientWs.readyState === WebSocket.OPEN) {
+                          clientWs.send(
+                            JSON.stringify({
+                              type: "audio",
+                              audio: chunk,
+                            })
+                          );
+                        }
+                      }
+                    } else {
+                      // Small chunk, send directly
+                      console.log(
+                        `Sending small chunk (${buffer.length} bytes)`
+                      );
+                      // if (ws.responseStream && !ws.responseStream.destroyed) {
+                      //   ws.responseStream.write(buffer);
+                      // }
+                      if (clientWs.readyState === WebSocket.OPEN) {
+                        clientWs.send(
+                          JSON.stringify({
+                            type: "audio",
+                            audio: buffer,
+                          })
+                        );
+                      }
+                    }
+                  }
+                  break;
+
+                case "conversation_initiation_metadata":
+                  console.log(
+                    "Conversation initiated:",
+                    message.conversation_initiation_metadata_event
+                  );
+                  // Forward conversation metadata to client
+                  if (clientWs.readyState === WebSocket.OPEN) {
+                    clientWs.send(
+                      JSON.stringify({
+                        type: "conversation_initiated",
+                        metadata:
+                          message.conversation_initiation_metadata_event,
+                      })
+                    );
+                  }
+                  break;
+
+                case "interruption":
+                  console.log("Conversation interrupted");
+                  // Forward interruption to client
+                  if (clientWs.readyState === WebSocket.OPEN) {
+                    clientWs.send(
+                      JSON.stringify({
+                        type: "interruption",
+                      })
+                    );
+                  }
+                  break;
+
+                case "ping":
+                  // Respond to ping with pong
+                  console.log("Received ping", message);
+                  if (wsElevenLabs.readyState === WebSocket.OPEN) {
+                    wsElevenLabs.send(
+                      JSON.stringify({
+                        type: "pong",
+                        event_id: message.ping_event.event_id,
+                      })
+                    );
+                  }
+                  break;
+
+                default:
+                  console.log("Unknown message type:", message);
+              }
+            } catch (error) {
+              console.error("Error parsing WebSocket message:", error);
+            }
+          });
+
+          wsElevenLabs.on("close", (code, reason) => {
+            console.log("WebSocket connection closed:", code, reason);
+            // Notify client that ElevenLabs connection closed
+            if (clientWs.readyState === WebSocket.OPEN) {
+              clientWs.send(
+                JSON.stringify({
+                  type: "elevenlabs_disconnected",
+                })
+              );
+            }
+          });
+
+          wsElevenLabs.on("error", (error) => {
+            console.error("WebSocket error:", error);
+            // Notify client of ElevenLabs connection error
+            if (clientWs.readyState === WebSocket.OPEN) {
+              clientWs.send(
+                JSON.stringify({
+                  type: "error",
+                  message: "ElevenLabs connection error",
+                })
+              );
+            }
+          });
           break;
         default:
-          console.log(
-            `Unknown message type from client ${clientId}:`,
-            message.type
-          );
+          console.log(`Unknown message type from client:`, message.type);
       }
     } catch (error) {
-      console.error(`Error processing message from client ${clientId}:`, error);
-      clientWs.send(
-        JSON.stringify({
-          type: "error",
-          message: "Invalid message format",
-        })
-      );
+      console.error(`Error processing message from client:`, error);
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(
+          JSON.stringify({
+            type: "error",
+            message: "Invalid message format",
+          })
+        );
+      }
     }
   });
 
   // Handle client disconnect
   clientWs.on("close", () => {
-    console.log(`Client ${clientId} disconnected`);
-    const connection = activeConnections.get(clientId);
-    if (connection && connection.elevenLabsWs) {
-      connection.elevenLabsWs.close();
+    console.log(`Client disconnected`);
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.close();
     }
-    activeConnections.delete(clientId);
+    if (wsElevenLabs && wsElevenLabs.readyState === WebSocket.OPEN) {
+      wsElevenLabs.close();
+    }
   });
 
   // Handle client errors
   clientWs.on("error", (error) => {
-    console.error(`WebSocket error for client ${clientId}:`, error);
-    const connection = activeConnections.get(clientId);
-    if (connection && connection.elevenLabsWs) {
-      connection.elevenLabsWs.close();
+    console.error(`WebSocket error for client:`, error);
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.close();
     }
-    activeConnections.delete(clientId);
+    if (wsElevenLabs && wsElevenLabs.readyState === WebSocket.OPEN) {
+      wsElevenLabs.close();
+    }
   });
 });
 
 /**
  * Handles audio data from client and forwards to ElevenLabs
  */
-const handleClientAudio = async (clientId, audioData) => {
-  const connection = activeConnections.get(clientId);
-  if (!connection) {
-    console.error(`No connection found for client ${clientId}`);
-    return;
-  }
-
-  // Create ElevenLabs connection if not exists
-  if (
-    !connection.elevenLabsWs ||
-    connection.elevenLabsWs.readyState === WebSocket.CLOSED
-  ) {
-    try {
-      console.log(`Creating ElevenLabs connection for client ${clientId}`);
-      connection.elevenLabsWs = await createElevenLabsConnectionForWebSocket(
-        connection.agentId,
-        connection.clientWs
-      );
-      connection.isConnected = true;
-    } catch (error) {
-      console.error(
-        `Failed to create ElevenLabs connection for client ${clientId}:`,
-        error
-      );
-      connection.clientWs.send(
-        JSON.stringify({
-          type: "error",
-          message: "Failed to connect to ElevenLabs agent",
-        })
-      );
-      return;
-    }
-  }
-
+const handleClientAudio = async (audioData) => {
   // Send audio to ElevenLabs if connection is ready
-  if (
-    connection.elevenLabsWs &&
-    connection.elevenLabsWs.readyState === WebSocket.OPEN
-  ) {
+  if (wsElevenLabs && wsElevenLabs.readyState === WebSocket.OPEN) {
     const message = JSON.stringify({
       user_audio_chunk: audioData,
     });
-    connection.elevenLabsWs.send(message);
+    wsElevenLabs.send(message);
   } else {
-    console.warn(`ElevenLabs connection not ready for client ${clientId}`);
+    console.warn(`ElevenLabs connection not ready for client`);
   }
 };
 
@@ -687,25 +678,25 @@ process.on("SIGINT", () => {
 });
 
 const PORT = process.env.PORT || 6035;
-server.listen(PORT, async () => {
-  console.log(`ElevenLabs Speech-to-Speech server running on port ${PORT}`);
-  console.log(`WebSocket server available at ws://localhost:${PORT}`);
-  console.log("Environment variables:");
-  console.log(
-    "- ELEVENLABS_AGENT_ID: Your ElevenLabs agent ID (can also be passed via x-agent-id header)"
-  );
-  console.log(
-    "- ELEVENLABS_API_KEY: Your ElevenLabs API key (optional - only required for private agents)"
-  );
+// server.listen(PORT, async () => {
+//   console.log(`ElevenLabs Speech-to-Speech server running on port ${PORT}`);
+//   console.log(`WebSocket server available at ws://localhost:${PORT}`);
+//   console.log("Environment variables:");
+//   console.log(
+//     "- ELEVENLABS_AGENT_ID: Your ElevenLabs agent ID (can also be passed via x-agent-id header)"
+//   );
+//   console.log(
+//     "- ELEVENLABS_API_KEY: Your ElevenLabs API key (optional - only required for private agents)"
+//   );
 
-  // Check if API key is set
-  if (!process.env.ELEVENLABS_API_KEY) {
-    console.log(
-      "ℹ️  No API key set - will attempt to connect to public agents only"
-    );
-  } else {
-    console.log(
-      "✅ ELEVENLABS_API_KEY is configured - can access both public and private agents"
-    );
-  }
-});
+//   // Check if API key is set
+//   if (!process.env.ELEVENLABS_API_KEY) {
+//     console.log(
+//       "ℹ️  No API key set - will attempt to connect to public agents only"
+//     );
+//   } else {
+//     console.log(
+//       "✅ ELEVENLABS_API_KEY is configured - can access both public and private agents"
+//     );
+//   }
+// });
