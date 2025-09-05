@@ -9,11 +9,11 @@ This repository showcases the integration between **Agent Voice Response** and *
 
 ## Features
 
-- **Dual Call Types**: Support for both agent-specific calls and generic calls
-- **Real-time Streaming**: WebSocket-based audio streaming with buffering
-- **External Voice Support**: Integration with ElevenLabs, Cartesia, LMNT, and generic voice providers
-- **Configurable Audio Settings**: Customizable sample rates and buffer sizes
-- **Tool Integration**: Support for custom tools and VAD settings
+- **WebSocket Support**: Real-time bidirectional audio streaming via WebSocket connections
+- **ElevenLabs Integration**: Direct integration with ElevenLabs Speech-to-Speech API
+- **Real-time Audio Processing**: Low-latency audio streaming with chunking support
+- **Transcript Forwarding**: Real-time transcript forwarding for both user and agent speech
+- **Connection Management**: Automatic connection handling and cleanup
 
 ## Configuration
 
@@ -21,8 +21,20 @@ This repository showcases the integration between **Agent Voice Response** and *
 
 Copy `.env.example` to `.env` and configure the following variables:
 
-#### Basic Configuration
+#### Required Configuration
+
+- `ELEVENLABS_AGENT_ID`: Your ElevenLabs agent ID (required)
+- `ELEVENLABS_API_KEY`: Your ElevenLabs API key (optional - only required for private agents)
 - `PORT`: Server port (default: 6035)
+
+### ⚠️ Important Audio Format Requirements
+
+**Before using this integration, you MUST configure your ElevenLabs agent with the following audio settings:**
+
+1. **User Input Audio Format**: Set to **PCM 8000 Hz**
+2. **TTS Output Format**: Set to **PCM 8000 Hz**
+
+These settings are crucial for proper audio compatibility and real-time streaming performance.
 
 ## Usage
 
@@ -33,36 +45,135 @@ npm install
 npm start
 ```
 
-### Making Requests
+The server will start on the configured port (default: 6035) and display connection information.
 
-Send a POST request to `/speech-to-speech-stream` with:
+### WebSocket Connection
 
-- **Headers:**
-  - `x-uuid`: Unique identifier for the call
-  - `Content-Type`: `audio/wav` (or appropriate audio format)
+Connect to the WebSocket server at `ws://localhost:6035` (or your configured port).
 
-- **Body:** Raw audio data stream
+### Message Protocol
+
+#### Client to Server Messages
+
+**Initialize Connection:**
+
+```json
+{
+  "type": "init"
+}
+```
+
+**Send Audio Data:**
+
+```json
+{
+  "type": "audio",
+  "audio": "<base64_encoded_audio_data>"
+}
+```
+
+#### Server to Client Messages
+
+**Transcript Messages:**
+
+```json
+{
+  "type": "transcript",
+  "role": "user|agent",
+  "text": "transcribed text"
+}
+```
+
+**Audio Response:**
+
+```json
+{
+  "type": "audio",
+  "audio": "<base64_encoded_audio_data>"
+}
+```
+
+**Interruption:**
+
+```json
+{
+  "type": "interruption"
+}
+```
+
+**Error Messages:**
+
+```json
+{
+  "type": "error",
+  "message": "error description"
+}
+```
 
 ### Example Usage
 
+```javascript
+const ws = new WebSocket("ws://localhost:6035");
 
+ws.onopen = () => {
+  // Initialize the connection
+  ws.send(JSON.stringify({ type: "init" }));
+};
 
-## API Response
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
 
-The service returns a stream of audio data from Ultravox. The response includes:
+  switch (message.type) {
+    case "connected":
+      console.log("Connected to server");
+      break;
+    case "transcript":
+      console.log(`${message.role}: ${message.text}`);
+      break;
+    case "audio":
+      // Handle audio data
+      const audioData = message.audio;
+      // Play or process the audio
+      break;
+    case "interruption":
+      console.log("Conversation interrupted");
+      break;
+    case "error":
+      console.error("Error:", message.message);
+      break;
+  }
+};
 
-- Real-time audio chunks from the AI
-- JSON control messages for call state management
-- Transcript information
+// Send audio data
+function sendAudio(audioBuffer) {
+  const base64Audio = audioBuffer.toString("base64");
+  ws.send(
+    JSON.stringify({
+      type: "audio",
+      audio: base64Audio,
+    })
+  );
+}
+```
+
+## Audio Processing
+
+The service handles real-time audio streaming with the following features:
+
+- **Audio Chunking**: Large audio chunks are automatically split into 8000-byte parts for optimal streaming
+- **Base64 Encoding**: All audio data is transmitted as base64-encoded strings
+- **Real-time Transcripts**: Both user and agent speech are transcribed and forwarded
+- **Connection Management**: Automatic cleanup and error handling
 
 ## Error Handling
 
 The service handles various error scenarios:
 
-- Missing required environment variables
-- Invalid API responses
+- Missing required environment variables (ELEVENLABS_AGENT_ID)
+- Invalid ElevenLabs API responses
 - WebSocket connection failures
 - Audio processing errors
+- Agent capacity limits (error 4300)
 
 ## Docker Support
 
@@ -71,15 +182,15 @@ The service handles various error scenarios:
 docker build -t avr-sts-elevenlabs .
 
 # Run with environment file
-docker run --env-file .env -p 6031:6031 avr-sts-elevenlabs
+docker run --env-file .env -p 6035:6035 avr-sts-elevenlabs
 ```
 
 ## Support & Community
 
-*   **GitHub:** [https://github.com/agentvoiceresponse](https://github.com/agentvoiceresponse) - Report issues, contribute code.
-*   **Discord:** [https://discord.gg/DFTU69Hg74](https://discord.gg/DFTU69Hg74) - Join the community discussion.
-*   **Docker Hub:** [https://hub.docker.com/u/agentvoiceresponse](https://hub.docker.com/u/agentvoiceresponse) - Find Docker images.
-*   **Wiki:** [https://wiki.agentvoiceresponse.com/en/home](https://wiki.agentvoiceresponse.com/en/home) - Project documentation and guides.
+- **GitHub:** [https://github.com/agentvoiceresponse](https://github.com/agentvoiceresponse) - Report issues, contribute code.
+- **Discord:** [https://discord.gg/DFTU69Hg74](https://discord.gg/DFTU69Hg74) - Join the community discussion.
+- **Docker Hub:** [https://hub.docker.com/u/agentvoiceresponse](https://hub.docker.com/u/agentvoiceresponse) - Find Docker images.
+- **Wiki:** [https://wiki.agentvoiceresponse.com/en/home](https://wiki.agentvoiceresponse.com/en/home) - Project documentation and guides.
 
 ## Support AVR
 
