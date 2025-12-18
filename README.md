@@ -27,6 +27,10 @@ Copy `.env.example` to `.env` and configure the following variables:
 - `ELEVENLABS_API_KEY`: Your ElevenLabs API key (optional - only required for private agents)
 - `PORT`: Server port (default: 6035)
 
+#### Dynamic Agent Selection (optional)
+
+- `ELEVENLABS_AGENT_URL`: HTTP endpoint that returns the agent to use for the current session. The server performs a GET to this URL and sends `X-AVR-UUID: <session uuid>`; the endpoint must reply with JSON containing a `system` field set to the ElevenLabs agent ID. If `ELEVENLABS_AGENT_ID` is also set, it takes precedence.
+
 ### ⚠️ Important Audio Format Requirements
 
 **Before using this integration, you MUST configure your ElevenLabs agent with the following audio settings:**
@@ -109,6 +113,27 @@ Connect to the WebSocket server at `ws://localhost:6035` (or your configured por
   "message": "error description"
 }
 ```
+
+### Tool Calls
+
+The server forwards ElevenLabs `client_tool_call` messages to local handlers. Out of the box it supports the default tools `avr_transfer` and `avr_hangup`; you can add more handlers as needed.
+
+- Handlers are looked up by `tool_name` via `loadTools.js`.
+- Each handler receives the session UUID and the tool `parameters`, then returns a serializable result.
+- On success the server responds with `client_tool_result` and `is_error: false`; if an exception is thrown, `is_error: true` with the error message is sent instead.
+
+Example response to ElevenLabs:
+
+```json
+{
+  "type": "client_tool_result",
+  "tool_call_id": "<id from tool_call>",
+  "result": { "status": "ok" },
+  "is_error": false
+}
+```
+
+For additional details see the integration guide: https://wiki.agentvoiceresponse.com/en/elevenlabs-speech-to-speech-integration-avr
 
 ### Example Usage
 
