@@ -10,7 +10,12 @@
  */
 
 const WebSocket = require("ws");
+const axios = require("axios");
+
+const { getToolHandler } = require("./loadTools");
+
 require("dotenv").config();
+
 /**
  * Gets a signed URL for private agent conversations
  * @param {string} agentId - The ElevenLabs agent ID
@@ -73,24 +78,12 @@ const createElevenLabsConnectionForWebSocket = async (agentId) => {
  *
  * @param {WebSocket} clientWs - Client WebSocket connection
  */
-const handleClientConnection = (clientWs) => {
+const handleClientConnection = async (clientWs) => {
   console.log("New client WebSocket connection received");
-  const agentId = process.env.ELEVENLABS_AGENT_ID || null;
+
+
   let wsElevenLabs = null;
-
-  console.log(`Agent ID: ${agentId}`);
-
-  if (!agentId) {
-    clientWs.send(
-      JSON.stringify({
-        type: "error",
-        message:
-          "Agent ID is required. Provide via ELEVENLABS_AGENT_ID environment variable.",
-      })
-    );
-    clientWs.close();
-    return;
-  }
+  let sessionUuid = null;
 
   // Handle incoming messages from client
   clientWs.on("message", async (data) => {
@@ -109,6 +102,8 @@ const handleClientConnection = (clientWs) => {
           break;
 
         case "init":
+          sessionUuid = message.uuid;
+          console.log("Session UUID:", sessionUuid);
           // Initialize ElevenLabs connection when client is ready
           initializeElevenLabsConnection();
           break;
@@ -124,13 +119,58 @@ const handleClientConnection = (clientWs) => {
 
   // Initialize ElevenLabs WebSocket connection
   const initializeElevenLabsConnection = async () => {
+    let agentId = null;
+
+    if (process.env.ELEVENLABS_AGENT_ID) {
+      console.log("Using ELEVENLABS_AGENT_ID from environment variable");
+      agentId = process.env.ELEVENLABS_AGENT_ID;
+    } else if (process.env.ELEVENLABS_AGENT_URL) {
+      console.log("Using ELEVENLABS_AGENT_URL from environment variable");
+      try {
+        const response = await axios.get(
+          process.env.ELEVENLABS_AGENT_URL,
+          {
+            headers: {
+              "Content-Type": "application/json",
+              "X-AVR-UUID": sessionUuid,
+            },
+          }
+        );
+        const data = await response.data;
+        console.log(data);
+        agentId = data.system;
+      } catch (error) {
+        console.error(
+          `Error loading agent ID from ${process.env.ELEVENLABS_AGENT_URL}: ${error.message}`
+        );
+        clientWs.close();
+        return;
+      }
+    } else {
+      console.error("Agent ID is required. Provide via ELEVENLABS_AGENT_ID or ELEVENLABS_AGENT_URL environment variable.");
+      clientWs.close();
+      return;
+    }
+
+    console.log(`Agent ID: ${agentId}`);
+
     try {
       wsElevenLabs = await createElevenLabsConnectionForWebSocket(agentId);
 
-      wsElevenLabs.on("message", (data) => {
+      wsElevenLabs.on("message", async (data) => {
         try {
           const message = JSON.parse(data);
           switch (message.type) {
+            case "conversation_initiation_metadata":
+              console.log("Received conversation initiation metadata message");
+              if (message.conversation_initiation_metadata_event.agent_output_audio_format != "pcm_8000") {
+                console.log("⚠️ Agent output audio format is not pcm_8000. Make sure to configure the agent output audio to PCM 8000 Hz! See: https://wiki.agentvoiceresponse.com/en/elevenlabs-speech-to-speech-integration-avr#%EF%B8%8F%EF%B8%8F%EF%B8%8F-important-audio-configuration-required");
+              } else if (message.conversation_initiation_metadata_event.user_input_audio_format != "pcm_8000") {
+                console.log("⚠️ User input audio format is not pcm_8000. Make sure to configure the user input audio to PCM 8000 Hz! See: https://wiki.agentvoiceresponse.com/en/elevenlabs-speech-to-speech-integration-avr#%EF%B8%8F%EF%B8%8F%EF%B8%8F-important-audio-configuration-required");
+              } else {
+                console.log("✅ Audio configuration is correct");
+              }
+              break;
             case "agent_response":
               console.log("Received agent response message");
               clientWs.send(
@@ -188,6 +228,49 @@ const handleClientConnection = (clientWs) => {
               );
               break;
 
+            case "client_tool_call":
+              console.log("Received client tool call message");
+              const name = message.client_tool_call.tool_name;
+              const parameters = message.client_tool_call.parameters;
+              try {
+                const handler = getToolHandler(name);
+                if (!handler) {
+                  console.error(`No handler found for tool: ${name}`);
+                  throw new Error(`No handler found for tool: ${name}`);
+                }
+
+                // Execute the tool handler with the provided arguments
+                const result = await handler(
+                  sessionUuid,
+                  parameters
+                );
+                console.log("Tool response:", result);
+                wsElevenLabs.send(
+                  JSON.stringify({
+                    type: "client_tool_result",
+                    tool_call_id: message.client_tool_call.tool_call_id,
+                    result,
+                    is_error: false
+                  })
+                );
+              } catch (error) {
+                console.error(`Error executing tool: ${name}`, error.message);
+                wsElevenLabs.send(
+                  JSON.stringify({
+                    type: "client_tool_result",
+                    tool_call_id: message.client_tool_call.tool_call_id,
+                    result: error.message,
+                    is_error: true
+                  })
+                );
+              }
+              break;
+
+            case "agent_tool_response":
+              console.log("Received agent tool response message");
+              console.log(message);
+              break;
+              
             default:
               console.log("Unknown message type:", message.type);
           }
@@ -271,11 +354,6 @@ const startServer = async () => {
 
     console.log(
       `ElevenLabs Speech-to-Speech WebSocket server running on port ${PORT}`
-    );
-    console.log("Environment variables:");
-    console.log("- ELEVENLABS_AGENT_ID: Your ElevenLabs agent ID");
-    console.log(
-      "- ELEVENLABS_API_KEY: Your ElevenLabs API key (optional - only required for private agents)"
     );
 
     // Check if API key is set
