@@ -77,10 +77,10 @@ const createElevenLabsConnectionForWebSocket = async (agentId) => {
  * Handles incoming client WebSocket connection and manages communication with ElevenLabs's API.
  *
  * @param {WebSocket} clientWs - Client WebSocket connection
+ * @param {Object} clientData - Query parameters extracted from the connection URL
  */
-const handleClientConnection = async (clientWs) => {
+const handleClientConnection = async (clientWs, clientData) => {
   console.log("New client WebSocket connection received");
-
 
   let wsElevenLabs = null;
   let sessionUuid = null;
@@ -157,6 +157,10 @@ const handleClientConnection = async (clientWs) => {
     try {
       wsElevenLabs = await createElevenLabsConnectionForWebSocket(agentId);
 
+      wsElevenLabs.on("open", () => {
+        send_client_metadata();
+      });
+
       wsElevenLabs.on("message", async (data) => {
         try {
           const message = JSON.parse(data);
@@ -171,6 +175,7 @@ const handleClientConnection = async (clientWs) => {
                 console.log("✅ Audio configuration is correct");
               }
               break;
+
             case "agent_response":
               console.log("Received agent response message");
               clientWs.send(
@@ -181,6 +186,7 @@ const handleClientConnection = async (clientWs) => {
                 })
               );
               break;
+
             case "user_transcript":
               console.log("Received user transcript message");
               clientWs.send(
@@ -270,7 +276,7 @@ const handleClientConnection = async (clientWs) => {
               console.log("Received agent tool response message");
               console.log(message);
               break;
-              
+
             default:
               console.log("Unknown message type:", message.type);
           }
@@ -321,6 +327,21 @@ const handleClientConnection = async (clientWs) => {
   });
 
   /**
+   * Sends dynamic variables to ElevenLabs using clientData extracted from the connection URL.
+   * All parameters are taken dynamically — no hardcoded values.
+   */
+  function send_client_metadata() {
+    console.log("Building dynamic variables from clientData:", clientData);
+    const metaData = {
+      type: "conversation_initiation_client_data",
+      dynamic_variables: clientData,
+    };
+    
+    wsElevenLabs.send(JSON.stringify(metaData));
+    console.log("Client metadata sent");
+  }
+
+  /**
    * Cleans up resources and closes connections.
    */
   function cleanup() {
@@ -347,15 +368,21 @@ const startServer = async () => {
     const PORT = process.env.PORT || 6035;
     const wss = new WebSocket.Server({ port: PORT });
 
-    wss.on("connection", (clientWs) => {
+    wss.on("connection", (clientWs, request) => {
       console.log("New client connected");
-      handleClientConnection(clientWs);
+
+      // Extract all query parameters dynamically from the connection URL
+      const base = `ws://${request.headers.host}`;
+      const url = new URL(request.url, base);
+      const clientData = Object.fromEntries(url.searchParams.entries());
+
+      handleClientConnection(clientWs, clientData);
     });
 
     console.log(
       `ElevenLabs Speech-to-Speech WebSocket server running on port ${PORT}`
     );
-
+    
     // Check if API key is set
     if (!process.env.ELEVENLABS_API_KEY) {
       console.log(
