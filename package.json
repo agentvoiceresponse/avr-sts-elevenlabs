@@ -1,6 +1,6 @@
 {
   "name": "avr-sts-elevenlabs",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "author": "Agent Voice Response <info@agentvoiceresponse.com>",
   "description": "OpenAI Speech-to-Speech service for Agent Voice Response",
   "main": "index.js",
